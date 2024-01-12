@@ -1,0 +1,61 @@
+pipeline {
+    agent {label 'Slave1'}
+    environment {
+        AWS_ACCESS_KEY_ID = credentials('aws_access_key')
+        AWS_SECRET_ACCESS_KEY = credentials('aws_secret_key')
+        devops = credentials('devops')
+    }
+    stages {
+        stage('SCM Checkout') {
+            steps {
+                git 'https://github.com/Shuchitha01/BankingApplication.git'
+                sh 'ls -ltr'
+            }
+        }
+         stage('Terraform') {
+             steps {
+                 sh 'echo "terraform"'
+                 sh 'terraform init'
+                 sh "terraform plan -var 'aws_access_key=${env.AWS_ACCESS_KEY_ID}' -var 'aws_secret_key=${env.AWS_SECRET_ACCESS_KEY}'"
+                 sh "terraform apply -var 'aws_access_key=${env.AWS_ACCESS_KEY_ID}' -var 'aws_secret_key=${env.AWS_SECRET_ACCESS_KEY}' -auto-approve"
+             }
+         }
+         stage('Maven Build') {
+            steps {
+                 sh 'ls -ltra'
+                 sh "mvn -Dmaven.test.failure.ignore=true clean package"
+             }
+         }
+         stage('Build image') {
+             steps {
+                 script {
+                     dockerImage = docker.build("shuchitha01/bankingapplication:latest")
+                 }
+             }
+         }
+         stage('Push image') {
+             steps {
+                 script {
+                     withDockerRegistry(credentialsId: "docker cred", url: "https://github.com/Shuchitha01/BankingApplication.git") {
+                         dockerImage.push()
+                     }
+                 }
+             }
+         }
+         stage('Install & Setup Kubernetes') {
+             steps {
+                 sh 'echo "Kubernetes"'
+                 sh 'ansible-playbook kube.yaml'
+                 sh 'ansible-playbook master.yaml'
+                 sh 'ansible-playbook workers.yaml'
+             }
+         }
+        stage('Deploy to kubernetes') {
+            steps {
+                sh 'echo "Kubernetes deployment"'
+                sh 'cat kube_from_ansible.yaml'
+                sh 'ansible-playbook kube_from_ansible.yaml -vvv'
+            }
+        }
+    }
+}
